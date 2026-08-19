@@ -1,6 +1,6 @@
 # Current Status — Android Cuttlefish on WSL2
 
-Last updated: 2026-08-19 14:06 +07
+Last updated: 2026-08-19 14:09 +07
 
 ## Goal
 Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo và chạy smoke test qua `adb`.
@@ -31,9 +31,28 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 8. Đã xác nhận Hyper-V hypervisor của Windows đang chạy.
 9. Đã kiểm tra VBS / Device Guard.
 10. Đã kiểm tra source đúng tag `microsoft/WSL` `2.7.12` và xác nhận WSL lifted/Store tự tắt nested virtualization trên Windows 10.
-11. `wsl --list --verbose` xác nhận distro thực tế là `Ubuntu`, đang chạy WSL2.
-12. Lệnh export đầu tiên thất bại vì copy nguyên placeholder `<DistroName>` vào PowerShell; chưa có thay đổi phá huỷ nào xảy ra.
-13. `Set-VMProcessor -VMName "<VMName>" ...` cũng thất bại vì `<VMName>` chỉ là placeholder và hiện chưa có Hyper-V VM riêng; lệnh này không áp dụng cho distro WSL `Ubuntu`.
+11. `wsl --list --verbose` xác nhận distro thực tế là `Ubuntu`, chạy WSL2.
+12. Đã backup distro thành công trước khi thay đổi WSL runtime.
+13. Đã kiểm tra tar backup có thể đọc directory listing.
+
+## Backup đã xác nhận
+PowerShell:
+```text
+wsl --terminate Ubuntu
+The operation completed successfully.
+
+wsl --export Ubuntu "$env:USERPROFILE\wsl-backup.tar"
+Export in progress ... (2403 MB)
+The operation completed successfully.
+
+FullName: C:\Users\duong\wsl-backup.tar
+Length: 2520647680 bytes
+LastWriteTime: 19/08/2026 2:08:43 PM
+```
+
+`tar -tf` đọc được rootfs, gồm `./etc/`, `./usr/`, `./root/`, `./home/`, `./bin/`, v.v.
+
+=> Backup đủ điều kiện để làm safety net cho các bước chuyển WSL runtime tiếp theo.
 
 ## KVM check mới nhất trong WSL
 ```text
@@ -85,7 +104,7 @@ Tham chiếu:
 - https://github.com/microsoft/WSL/blob/2.7.12/src/windows/service/exe/WslCoreVm.cpp
 - https://github.com/microsoft/WSL/issues/40735
 
-Điều này khớp chính xác với triệu chứng hiện tại: `vmx=0` và không có `/dev/kvm`.
+Issue #40735 ghi nhận inbox WSL2 trên Windows 10 build 19041-19045 từng expose `vmx` trên phần cứng hỗ trợ nested virtualization, còn lifted/Store WSL hiện chặn trên Windows 10.
 
 ## Cuttlefish requirement
 Tài liệu Android hiện tại yêu cầu host có KVM; `grep -c -w "vmx\|svm" /proc/cpuinfo` phải trả về giá trị khác 0 và `/dev/kvm` phải tồn tại.
@@ -96,28 +115,26 @@ Tham chiếu:
 ## Current blocker
 **Windows 10 + lifted/Store WSL `2.7.12` không expose nested virtualization.** Vì vậy Cuttlefish không thể launch bằng KVM trong WSL2 hiện tại.
 
-Tắt VBS có thể vẫn cần trong một cấu hình nested virtualization khác, nhưng với WSL `2.7.12` trên Windows 10 thì source WSL đã chặn trước đó, nên không nên reboot/tắt VBS chỉ để thử bước này.
-
 ## Build dependencies còn thiếu
 `cmake dh-exec libaom-dev libcap-dev libclang-dev libcurl4-openssl-dev libfmt-dev libgflags-dev libgoogle-glog-dev libgtest-dev libjsoncpp-dev liblzma-dev libopus-dev libprotobuf-c-dev libprotobuf-dev libsrtp2-dev libssl-dev libwayland-dev libxml2 libxml2-dev libz3-dev protobuf-compiler uuid-dev`
 
 ## Next step
-Backup distro `Ubuntu` trước mọi thay đổi WSL. Chạy trong Windows PowerShell:
+Backup đã xong. **Chưa uninstall Store WSL và chưa unregister distro.** Trước tiên xác nhận khả năng dùng inbox WSL2 bằng các lệnh read-only trong PowerShell Administrator:
 
 ```powershell
-wsl --terminate Ubuntu
-wsl --export Ubuntu "$env:USERPROFILE\wsl-backup.tar"
-Get-Item "$env:USERPROFILE\wsl-backup.tar" | Select-Object FullName,Length,LastWriteTime
+wsl --status
+wsl --version
+
+Get-AppxPackage -AllUsers MicrosoftCorporationII.WindowsSubsystemForLinux |
+  Select-Object Name,PackageFullName,Version,InstallLocation
+
+Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux |
+  Select-Object FeatureName,State
+
+Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform |
+  Select-Object FeatureName,State
 ```
 
-Có thể kiểm tra archive đọc được bằng:
+Microsoft docs xác nhận inbox WSL2 trên Windows 10 cần hai optional feature `Microsoft-Windows-Subsystem-Linux` và `VirtualMachinePlatform`. `wsl --install --inbox` là option dành cho trường hợp WSL chưa được cài, nên không chạy nó trực tiếp khi lifted WSL vẫn đang installed.
 
-```powershell
-tar -tf "$env:USERPROFILE\wsl-backup.tar" | Select-Object -First 20
-```
-
-Không chạy `wsl --unregister` cho tới khi export thành công và archive đã được kiểm tra.
-
-`Set-VMProcessor` chỉ dùng nếu sau này tạo **Hyper-V VM riêng**; không dùng tên `Ubuntu` của distro WSL cho lệnh đó.
-
-Sau khi backup được xác nhận, bước tiếp theo mới là đánh giá cách chuyển/test inbox WSL2 của Windows 10 và kiểm tra lại KVM.
+Sau khi có output của các lệnh trên mới quyết định chính xác cách tháo lifted/Store WSL mà giữ distro/backup an toàn, rồi chuyển sang inbox runtime và kiểm tra lại `vmx` + `/dev/kvm`.
