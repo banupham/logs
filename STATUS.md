@@ -1,6 +1,6 @@
 # Current Status — Android Cuttlefish on WSL2
 
-Last updated: 2026-08-19 13:56 +07
+Last updated: 2026-08-19 14:00 +07
 
 ## Goal
 Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo và chạy smoke test qua `adb`.
@@ -29,6 +29,7 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 7. Đã kiểm tra lại KVM trong WSL.
 8. Đã xác nhận Hyper-V hypervisor của Windows đang chạy.
 9. Đã kiểm tra VBS / Device Guard.
+10. Đã kiểm tra source đúng tag `microsoft/WSL` `2.7.12` và xác nhận WSL lifted/Store tự tắt nested virtualization trên Windows 10.
 
 ## KVM check mới nhất trong WSL
 ```text
@@ -61,22 +62,59 @@ RequiredSecurityProperties        : {0}
 Diễn giải:
 - `VirtualizationBasedSecurityStatus = 2`: VBS đang enabled và running.
 - Không có Credential Guard / Memory Integrity service đang configured hoặc running (`{0}`).
-- Microsoft Hyper-V nested virtualization troubleshooting ghi nhận VBS/Device Guard active có thể chặn nested virtualization.
+- VBS có thể cản nested virtualization trong một số Hyper-V scenario, nhưng **không còn là blocker chính cần thử trước** trong cấu hình hiện tại.
+
+## Root cause mới xác định
+Source của chính WSL tag `2.7.12` tại `src/windows/service/exe/WslCoreVm.cpp` có logic:
+
+```cpp
+if (wsl::windows::common::helpers::IsWindows11OrAbove()) {
+    // query NestedVirt support
+} else {
+    m_vmConfig.EnableNestedVirtualization = false;
+}
+```
+
+Nghĩa là trên Windows 10, bản WSL lifted/Store `2.7.12` sẽ không expose virtualization extensions cho WSL2 dù `.wslconfig` có `nestedVirtualization=true`.
+
+Tham chiếu:
+- https://github.com/microsoft/WSL/blob/2.7.12/src/windows/service/exe/WslCoreVm.cpp
+- https://github.com/microsoft/WSL/issues/40735
+
+Điều này khớp chính xác với triệu chứng hiện tại: `vmx=0` và không có `/dev/kvm`.
+
+## Cuttlefish requirement
+Tài liệu Android hiện tại yêu cầu host có KVM; `grep -c -w "vmx\|svm" /proc/cpuinfo` phải trả về giá trị khác 0 và `/dev/kvm` phải tồn tại.
+
+Tham chiếu:
+- https://source.android.com/docs/devices/cuttlefish/get-started
 
 ## Current blocker
-WSL2 chưa nhận nested virtualization (`vmx` không xuất hiện, `/dev/kvm` không có) dù BIOS VT-x đã bật, Hyper-V đang chạy và `.wslconfig` đã `nestedVirtualization=true`.
+**Windows 10 + lifted/Store WSL `2.7.12` không expose nested virtualization.** Vì vậy Cuttlefish không thể launch bằng KVM trong WSL2 hiện tại.
+
+Tắt VBS có thể vẫn cần trong một cấu hình nested virtualization khác, nhưng với WSL `2.7.12` trên Windows 10 thì source WSL đã chặn trước đó, nên không nên reboot/tắt VBS chỉ để thử bước này.
 
 ## Build dependencies còn thiếu
 `cmake dh-exec libaom-dev libcap-dev libclang-dev libcurl4-openssl-dev libfmt-dev libgflags-dev libgoogle-glog-dev libgtest-dev libjsoncpp-dev liblzma-dev libopus-dev libprotobuf-c-dev libprotobuf-dev libsrtp2-dev libssl-dev libwayland-dev libxml2 libxml2-dev libz3-dev protobuf-compiler uuid-dev`
 
 ## Next step
-Tạm tắt VBS để kiểm tra nested virtualization. Thực hiện trong **Windows PowerShell — Run as Administrator**:
+Ưu tiên giữ đúng mục tiêu Windows + WSL2: **đánh giá chuyển từ lifted/Store WSL sang inbox WSL2 của Windows 10**, vì issue WSL #40735 ghi nhận inbox WSL2 trên Windows 10 từng expose nested virtualization, trong khi lifted WSL hiện chặn nó.
+
+Trước mọi thay đổi WSL có tính phá huỷ, phải backup distro:
 
 ```powershell
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard" /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 0 /f
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard" /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 0 /f
-bcdedit /set vsmlaunchtype off
-Restart-Computer
+wsl --list --verbose
+# Dùng đúng distro name hiển thị ở trên:
+wsl --export <DistroName> "$env:USERPROFILE\wsl-backup.tar"
 ```
 
-Sau reboot sẽ kiểm tra lại VBS và KVM. Không tắt `hypervisorlaunchtype`, vì WSL2 vẫn cần Hyper-V hypervisor.
+Không chạy `wsl --unregister` khi chưa có backup kiểm tra được.
+
+Sau backup, hướng thử tiếp theo là chuyển/test inbox WSL (`wsl --install --inbox` chỉ áp dụng khi WSL chưa được cài), rồi kiểm tra lại:
+
+```bash
+grep -c -w 'vmx\|svm' /proc/cpuinfo
+ls -l /dev/kvm
+```
+
+Nếu inbox WSL không khả thi hoặc vẫn không có KVM, fallback đáng tin cậy hơn là chạy Ubuntu trong một Hyper-V VM và bật `ExposeVirtualizationExtensions`, sau đó chạy Cuttlefish trong VM đó; cách này không còn là WSL2 nhưng vẫn giữ Windows làm host.
