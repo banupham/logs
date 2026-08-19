@@ -1,6 +1,6 @@
 # Current Status — Android Cuttlefish on WSL2
 
-Last updated: 2026-08-19 14:14 +07
+Last updated: 2026-08-19 14:16 +07
 
 ## Goal
 Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo và chạy smoke test qua `adb`.
@@ -10,7 +10,7 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 - Ubuntu 26.04 LTS trong WSL2.
 - WSL distro name: `Ubuntu`.
 - WSL version: `2.7.12.0` (lifted/Store package).
-- WSL kernel: `6.18.33.2-2`.
+- WSL kernel hiện tại khi chạy Store runtime: `6.18.33.2-2`.
 - WSLg: `1.0.73.2`.
 - Architecture: `amd64` / `x86_64`.
 - Laptop: `ASUSTeK COMPUTER INC. X541UV`.
@@ -30,7 +30,7 @@ C:\Users\duong\wsl-backup.tar
 
 `tar -tf` đọc được rootfs (`./etc/`, `./usr/`, `./root/`, `./home/`, `./bin/`, ...).
 
-=> Có safety net trước các thay đổi WSL runtime. Không chạy `wsl --unregister Ubuntu`.
+=> Có safety net trước các thay đổi WSL runtime. **Không chạy `wsl --unregister Ubuntu`.**
 
 ## KVM check hiện tại
 ```text
@@ -65,35 +65,38 @@ Tham chiếu:
 
 Issue #40735 ghi nhận inbox WSL2 trên Windows 10 19041-19045 từng expose nested virtualization, còn lifted WSL hiện chặn nó.
 
-## Store package / inbox readiness mới nhất
-PowerShell xác nhận:
-
+## Store package / inbox readiness
+Store package:
 ```text
-Package: MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.12.0_x64__8wekyb3d8bbwe
+MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.12.0_x64__8wekyb3d8bbwe
 NonRemovable: False
 Status: Ok
 User duong: Installed
 ```
 
-Services:
+Services trước chuyển đổi:
 ```text
 LxssManager  Stopped  Manual
 WslService   Running  Automatic
 ```
 
-Inbox kernel check:
+Hai Windows optional feature cần cho inbox WSL2 đều `Enabled`:
+- `Microsoft-Windows-Subsystem-Linux`
+- `VirtualMachinePlatform`
+
+## Inbox kernel đã cài thành công
+Đã download và cài Microsoft x64 WSL2 kernel update MSI bằng `msiexec`.
+
+Sau cài đặt:
 ```text
-C:\Windows\System32\lxss\tools\kernel
-=> không tồn tại / không trả về kết quả
+FullName: C:\Windows\System32\lxss\tools\kernel
+Length: 70722784
+LastWriteTime: 13/04/2021 12:06:16 PM
 ```
 
-Diễn giải:
-- Store/lifted WSL package có thể gỡ (`NonRemovable=False`).
-- `WslService` đang là active lifted service; `LxssManager` inbox đang tồn tại nhưng stopped.
-- Hai optional feature của inbox WSL2 đều Enabled.
-- **Inbox kernel chưa được cài**, nên chưa gỡ Store package ngay để tránh rơi vào trạng thái không có kernel WSL2.
+=> Inbox WSL2 kernel hiện đã tồn tại; không còn blocker “thiếu kernel” trước khi tháo Store/lifted runtime.
 
-Microsoft manual-install docs và troubleshooting ghi rõ kernel MSI cho inbox WSL2 cài kernel vào Windows OS image; nếu `%SystemRoot%\System32\lxss\tools\kernel` thiếu thì cần cài kernel update package.
+Microsoft docs mô tả `wsl --update --inbox` là cập nhật riêng inbox WSL2 kernel, không cài Store version.
 
 ## Cuttlefish requirement
 Cuttlefish cần KVM; `vmx|svm` phải xuất hiện trong `/proc/cpuinfo` và `/dev/kvm` phải tồn tại trước khi launch.
@@ -105,20 +108,42 @@ Tham chiếu:
 Build host package từng dừng ở `mk-build-deps` do thiếu dependencies; chưa tạo/cài `cuttlefish-base` / `cuttlefish-user`; `~/cf` chưa có host package hay Android image. Build chưa phải ưu tiên cho tới khi KVM hoạt động.
 
 ## Current blocker
-Lifted/Store WSL `2.7.12` trên Windows 10 không expose nested virtualization. Hướng đang thử là chuyển về inbox WSL2, nhưng cần cài inbox kernel trước khi gỡ Store runtime.
+Lifted/Store WSL `2.7.12` trên Windows 10 không expose nested virtualization. Inbox prerequisites + kernel hiện đã sẵn sàng, nên bước kế tiếp là chuyển runtime từ Store/lifted sang inbox.
 
 ## Next step
-Cài **inbox WSL2 kernel MSI trước**, chưa uninstall Store WSL ở bước này. PowerShell Administrator:
+PowerShell Administrator:
 
 ```powershell
 wsl --shutdown
-
-$msi = "$env:TEMP\wsl_update_x64.msi"
-Invoke-WebRequest -Uri "https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi" -OutFile $msi
-Start-Process msiexec.exe -Wait -ArgumentList '/i', "`"$msi`"", '/passive', '/norestart'
-
-Get-Item "$env:SystemRoot\System32\lxss\tools\kernel" -ErrorAction SilentlyContinue |
-  Select-Object FullName,Length,LastWriteTime
+wsl --update --inbox
 ```
 
-Nếu kernel file xuất hiện, bước sau mới là gỡ **chỉ** package `MicrosoftCorporationII.WindowsSubsystemForLinux` (không gỡ distro Ubuntu, không unregister), reboot nếu cần, rồi xác nhận runtime chuyển sang inbox và test `vmx` + `/dev/kvm`.
+Nếu `wsl --update --inbox` thành công, gỡ **chỉ Store WSL core package**:
+
+```powershell
+$pkg = Get-AppxPackage -AllUsers -Name MicrosoftCorporationII.WindowsSubsystemForLinux
+$pkg | Select-Object Name,PackageFullName,Version,NonRemovable
+Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers
+Restart-Computer
+```
+
+**Không chạy `wsl --unregister Ubuntu`. Không uninstall Ubuntu app.**
+
+Sau reboot, kiểm tra Windows side:
+
+```powershell
+Get-AppxPackage -AllUsers MicrosoftCorporationII.WindowsSubsystemForLinux
+Get-Service LxssManager,WslService -ErrorAction SilentlyContinue | Select Name,Status,StartType
+wsl --status
+wsl -l -v
+```
+
+Sau đó launch `Ubuntu` và kiểm tra Linux side:
+
+```bash
+uname -r
+grep -c -w 'vmx\|svm' /proc/cpuinfo
+ls -l /dev/kvm
+```
+
+Nếu `vmx > 0` và `/dev/kvm` tồn tại, quay lại cài/build Cuttlefish host package và image. Nếu vẫn `vmx=0`, đánh giá VBS/CPU/inbox nested virtualization trước khi fallback sang Hyper-V VM riêng.
