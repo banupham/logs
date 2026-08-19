@@ -1,16 +1,17 @@
 # Current Status — Android Cuttlefish on WSL2
 
-Last updated: 2026-08-19 14:09 +07
+Last updated: 2026-08-19 14:12 +07
 
 ## Goal
 Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo và chạy smoke test qua `adb`.
 
 ## Environment
-- Windows 10 Pro for Workstations, build `19045`.
+- Windows 10 Pro for Workstations, build `19045.6456`.
 - Ubuntu 26.04 LTS trong WSL2.
 - WSL distro name: `Ubuntu`.
-- WSL version: `2.7.12`.
-- WSL kernel: `6.18.33.2-microsoft-standard-WSL2`.
+- WSL version: `2.7.12.0` (lifted/Store package).
+- WSL kernel: `6.18.33.2-2`.
+- WSLg: `1.0.73.2`.
 - Architecture: `amd64` / `x86_64`.
 - Laptop: `ASUSTeK COMPUTER INC. X541UV`.
 - CPU: `Intel(R) Core(TM) i5-6198DU CPU @ 2.30GHz`.
@@ -34,6 +35,12 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 11. `wsl --list --verbose` xác nhận distro thực tế là `Ubuntu`, chạy WSL2.
 12. Đã backup distro thành công trước khi thay đổi WSL runtime.
 13. Đã kiểm tra tar backup có thể đọc directory listing.
+14. `wsl --status` xác nhận default distro `Ubuntu`, default version `2`.
+15. `wsl --version` xác nhận lifted WSL `2.7.12.0` trên Windows `10.0.19045.6456`.
+16. `Get-AppxPackage -AllUsers MicrosoftCorporationII.WindowsSubsystemForLinux` xác nhận package `MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.12.0_x64__8wekyb...` đang cài.
+17. Hai optional feature cần cho inbox WSL2 đều `Enabled`:
+    - `Microsoft-Windows-Subsystem-Linux`
+    - `VirtualMachinePlatform`
 
 ## Backup đã xác nhận
 PowerShell:
@@ -64,10 +71,11 @@ kvm modules: không có
 ## Windows virtualization / hypervisor
 ```text
 WindowsProductName: Windows 10 Pro for Workstations
-OsBuildNumber: 19045
+OsBuildNumber: 19045.6456
 HyperVisorPresent: True
 hypervisorlaunchtype: Auto
 VirtualMachinePlatform: Enabled
+Microsoft-Windows-Subsystem-Linux: Enabled
 .wslconfig: nestedVirtualization=true
 systeminfo: A hypervisor has been detected
 ```
@@ -115,26 +123,30 @@ Tham chiếu:
 ## Current blocker
 **Windows 10 + lifted/Store WSL `2.7.12` không expose nested virtualization.** Vì vậy Cuttlefish không thể launch bằng KVM trong WSL2 hiện tại.
 
+Hai inbox Windows features đã Enabled, nên hướng chuyển về inbox WSL2 vẫn khả thi về mặt prerequisite.
+
 ## Build dependencies còn thiếu
 `cmake dh-exec libaom-dev libcap-dev libclang-dev libcurl4-openssl-dev libfmt-dev libgflags-dev libgoogle-glog-dev libgtest-dev libjsoncpp-dev liblzma-dev libopus-dev libprotobuf-c-dev libprotobuf-dev libsrtp2-dev libssl-dev libwayland-dev libxml2 libxml2-dev libz3-dev protobuf-compiler uuid-dev`
 
 ## Next step
-Backup đã xong. **Chưa uninstall Store WSL và chưa unregister distro.** Trước tiên xác nhận khả năng dùng inbox WSL2 bằng các lệnh read-only trong PowerShell Administrator:
+**Chưa unregister distro. Chưa gỡ package ngay.** Kiểm tra read-only package removability, inbox kernel và service state trong PowerShell Administrator:
 
 ```powershell
-wsl --status
-wsl --version
-
 Get-AppxPackage -AllUsers MicrosoftCorporationII.WindowsSubsystemForLinux |
-  Select-Object Name,PackageFullName,Version,InstallLocation
+  Format-List Name,PackageFullName,Version,NonRemovable,Status,InstallLocation,PackageUserInformation
 
-Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux |
-  Select-Object FeatureName,State
+Get-Item "$env:SystemRoot\System32\lxss\tools\kernel" -ErrorAction SilentlyContinue |
+  Select-Object FullName,Length,LastWriteTime
 
-Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform |
-  Select-Object FeatureName,State
+Get-Service LxssManager,WslService -ErrorAction SilentlyContinue |
+  Select-Object Name,Status,StartType
 ```
 
-Microsoft docs xác nhận inbox WSL2 trên Windows 10 cần hai optional feature `Microsoft-Windows-Subsystem-Linux` và `VirtualMachinePlatform`. `wsl --install --inbox` là option dành cho trường hợp WSL chưa được cài, nên không chạy nó trực tiếp khi lifted WSL vẫn đang installed.
+Nếu package removable và inbox components tồn tại, kế hoạch là:
+1. `wsl --shutdown`.
+2. Gỡ **chỉ lifted/Store WSL package**, không gỡ `Ubuntu`, không `wsl --unregister`.
+3. Khởi động lại Windows nếu cần để service binding chuyển về inbox.
+4. Chạy `wsl --update --inbox` để đảm bảo inbox WSL2 kernel được cài/cập nhật (Microsoft docs phân biệt đây là update kernel inbox, không cài Store WSL).
+5. Kiểm tra `wsl -l -v`, launch `Ubuntu`, rồi kiểm tra `vmx` và `/dev/kvm`.
 
-Sau khi có output của các lệnh trên mới quyết định chính xác cách tháo lifted/Store WSL mà giữ distro/backup an toàn, rồi chuyển sang inbox runtime và kiểm tra lại `vmx` + `/dev/kvm`.
+Nếu package hiện là non-removable/system-component, dừng trước khi dùng các cách force-delete; sẽ chuyển sang phương án khác an toàn hơn.
