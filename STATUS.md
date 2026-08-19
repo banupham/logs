@@ -1,6 +1,6 @@
 # Current Status — Android Cuttlefish on WSL2
 
-Last updated: 2026-08-19 13:45 +07
+Last updated: 2026-08-19 13:47 +07
 
 ## Goal
 
@@ -15,6 +15,7 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 - Commit đang checkout: `a318f97e7`.
 - Git state: detached HEAD (`HEAD (no branch)`).
 - Bazel đã cài: `bazel 9.2.0`, Debian package trạng thái `install ok installed`.
+- WSL đã được cập nhật lên version `2.7.12` theo output PowerShell ngày 2026-08-19.
 
 ## Đã làm
 
@@ -28,6 +29,7 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 8. Lần kiểm tra virtualization trước cho thấy `/dev/kvm` chưa tồn tại và `vmx|svm` chưa được expose.
 9. Đã xác nhận user hiện chưa thuộc các group cần thiết; `cvdnetwork` chưa tồn tại ở thời điểm kiểm tra.
 10. Đã chạy thành công từ Windows PowerShell: `wsl --update` và `wsl --shutdown`.
+11. PowerShell báo cập nhật WSL thành công lên `2.7.12`.
 
 ## Build dependencies còn thiếu
 
@@ -61,7 +63,7 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 
 ### Blocker 1 — KVM / nested virtualization
 
-Sau khi đã chạy `wsl --update` và `wsl --shutdown`, cần kiểm tra lại trong Ubuntu xem virtualization flags và `/dev/kvm` đã xuất hiện chưa.
+Sau khi đã chạy `wsl --update` và `wsl --shutdown`, cần mở lại Ubuntu và kiểm tra xem virtualization flags và `/dev/kvm` đã xuất hiện chưa.
 
 ### Blocker 2 — Host packages chưa sẵn sàng
 
@@ -73,7 +75,13 @@ Vì mục tiêu là **mở thiết bị ảo và test nhanh**, ưu tiên dùng p
 
 ## Next step
 
-Thực hiện trong **Ubuntu/WSL terminal** sau khi mở lại Ubuntu:
+Từ **Windows PowerShell**, mở lại Ubuntu bằng:
+
+```powershell
+wsl
+```
+
+Sau khi prompt chuyển sang dạng Linux như `duong@DESKTOP-Q1DQINK:~$`, chạy trong **Ubuntu/WSL terminal**:
 
 ```bash
 grep -c -w 'vmx\|svm' /proc/cpuinfo
@@ -81,9 +89,9 @@ ls -l /dev/kvm
 lsmod | grep '^kvm'
 ```
 
-Gửi nguyên output của 3 lệnh này để xác định bước tiếp theo.
+Gửi nguyên output của 3 lệnh kiểm tra KVM để xác định bước tiếp theo.
 
 ## Important note
 
-- Lệnh `wsl --update` / `wsl --shutdown` chạy từ Windows PowerShell hoặc CMD.
+- `wsl --update`, `wsl --shutdown`, và lệnh `wsl` để mở distro chạy từ Windows PowerShell hoặc CMD.
 - Các lệnh kiểm tra `/proc/cpuinfo`, `/dev/kvm`, `lsmod` chạy trong Ubuntu/WSL terminal.
