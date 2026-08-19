@@ -1,6 +1,6 @@
 # Current Status — Android Cuttlefish on WSL2
 
-Last updated: 2026-08-19 13:52 +07
+Last updated: 2026-08-19 13:53 +07
 
 ## Goal
 Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo và chạy smoke test qua `adb`.
@@ -26,6 +26,7 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 7. Đã kiểm tra lại KVM trong WSL.
 8. Đã kiểm tra virtualization state trên Windows.
 9. Đã xác định model máy: ASUS X541UV.
+10. Người dùng xác nhận trong BIOS, `Intel Virtualization Technology` đã ở trạng thái `Enabled` từ trước.
 
 ## KVM check mới nhất
 ```text
@@ -41,25 +42,24 @@ VMMonitorModeExtensions = False
 SecondLevelAddressTranslationExtensions = False
 VirtualMachinePlatform = Enabled
 .wslconfig: nestedVirtualization=true
-hypervisorlaunchtype: không có output
+hypervisorlaunchtype: không có output khi dùng `bcdedit /enum {current} | findstr ...`
 ```
 
 ## Kết luận hiện tại
-Blocker chính là virtualization đang chưa được firmware/BIOS expose. Cần bật Intel Virtualization Technology (VT-x/VMX) trong BIOS trước khi tiếp tục Cuttlefish.
+Không còn giả định BIOS đang tắt virtualization, vì người dùng đã xác nhận `Intel Virtualization Technology = Enabled` trong BIOS. Cần chẩn đoán tiếp Windows hypervisor/boot configuration và phiên bản Windows trước khi kết luận nguyên nhân WSL không expose `vmx` và `/dev/kvm`.
 
 ## Build dependencies còn thiếu
 `cmake dh-exec libaom-dev libcap-dev libclang-dev libcurl4-openssl-dev libfmt-dev libgflags-dev libgoogle-glog-dev libgtest-dev libjsoncpp-dev liblzma-dev libopus-dev libprotobuf-c-dev libprotobuf-dev libsrtp2-dev libssl-dev libwayland-dev libxml2 libxml2-dev libz3-dev protobuf-compiler uuid-dev`
 
 ## Next step
-Trên ASUS X541UV, vào BIOS/UEFI và bật Intel Virtualization Technology:
+Chạy trong **Windows PowerShell — Run as Administrator**:
 
-1. Từ Windows PowerShell (Administrator) chạy:
 ```powershell
-shutdown /r /fw /t 0
-```
-2. Trong BIOS, vào `Advanced` → `CPU Configuration`.
-3. Đặt `Intel Virtualization Technology` hoặc `Intel (VMX) Virtualization Technology` thành `Enabled`.
-4. Nhấn `F10` để Save & Exit.
-5. Sau khi Windows khởi động lại, kiểm tra lại trạng thái virtualization trước khi quay lại WSL.
+Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion,OsBuildNumber,HyperVisorPresent
 
-Nguồn tham chiếu: ASUS X541UV support page và ASUS official virtualization BIOS guidance.
+bcdedit /enum | findstr /i hypervisorlaunchtype
+
+systeminfo
+```
+
+Gửi nguyên output của 3 lệnh trên để xác định Windows hypervisor có đang chạy và boot configuration có đang chặn nested virtualization hay không.
