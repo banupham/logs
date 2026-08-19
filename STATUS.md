@@ -1,6 +1,6 @@
 # Current Status — Android Cuttlefish on WSL2
 
-Last updated: 2026-08-19 13:49 +07
+Last updated: 2026-08-19 13:51 +07
 
 ## Goal
 
@@ -12,6 +12,7 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 - WSL version: `2.7.12`.
 - WSL kernel quan sát được trước đó: `6.18.33.2-microsoft-standard-WSL2`.
 - Architecture: `amd64` / `x86_64`.
+- CPU: `Intel(R) Core(TM) i5-6198DU CPU @ 2.30GHz`.
 - Repo Cuttlefish tại `~/src/android-cuttlefish`.
 - Commit: `a318f97e7`.
 - Git state: detached HEAD.
@@ -26,51 +27,49 @@ Khởi chạy Android Cuttlefish trên Windows + WSL2, mở thiết bị ảo v�
 5. `~/cf` chưa có host package hoặc Android image.
 6. Đã chạy từ Windows PowerShell: `wsl --update` và `wsl --shutdown`.
 7. Đã mở lại Ubuntu/WSL và kiểm tra KVM.
+8. Đã kiểm tra Windows virtualization state bằng PowerShell.
 
 ## KVM check mới nhất
 
-Chạy trong Ubuntu/WSL:
-
-```bash
-grep -c -w 'vmx\|svm' /proc/cpuinfo
-ls -l /dev/kvm
-lsmod | grep '^kvm'
-```
-
-Kết quả:
+Trong Ubuntu/WSL:
 
 ```text
-0
-ls: cannot access '/dev/kvm': No such file or directory
-(no kvm modules listed)
+vmx|svm count: 0
+/dev/kvm: không tồn tại
+kvm modules: không có
 ```
 
-Kết luận hiện tại: WSL2 chưa nhận virtualization extensions, nên chưa thể launch Cuttlefish.
+## Windows virtualization check mới nhất
+
+PowerShell Administrator trả về:
+
+```text
+VirtualizationFirmwareEnabled = False
+VMMonitorModeExtensions = False
+SecondLevelAddressTranslationExtensions = False
+VirtualMachinePlatform = Enabled
+.wslconfig: nestedVirtualization=true
+hypervisorlaunchtype: không có output
+```
+
+## Kết luận hiện tại
+
+Blocker chính nằm ở firmware/BIOS: Windows đang báo `VirtualizationFirmwareEnabled=False`. `VirtualMachinePlatform` và cấu hình WSL đã bật, nhưng CPU virtualization chưa được firmware expose cho Windows/WSL.
 
 ## Build dependencies còn thiếu
 
 `cmake dh-exec libaom-dev libcap-dev libclang-dev libcurl4-openssl-dev libfmt-dev libgflags-dev libgoogle-glog-dev libgtest-dev libjsoncpp-dev liblzma-dev libopus-dev libprotobuf-c-dev libprotobuf-dev libsrtp2-dev libssl-dev libwayland-dev libxml2 libxml2-dev libz3-dev protobuf-compiler uuid-dev`
 
-## Current blocker
-
-KVM / nested virtualization chưa hoạt động trong WSL2.
-
 ## Decision / direction
 
-Ưu tiên làm cho KVM hoạt động trước. Cuttlefish yêu cầu virtualization/KVM trên host; chưa tiếp tục cài host package hoặc tải Android image cho đến khi xác định nguyên nhân KVM không xuất hiện.
+Ưu tiên bật Intel CPU virtualization trong BIOS/UEFI trước khi tiếp tục Cuttlefish.
 
 ## Next step
 
 Chạy trong **Windows PowerShell — Run as Administrator**:
 
 ```powershell
-Get-CimInstance Win32_Processor | Select-Object Name,VirtualizationFirmwareEnabled,VMMonitorModeExtensions,SecondLevelAddressTranslationExtensions
-
-Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform
-
-Get-Content "$env:USERPROFILE\.wslconfig" -ErrorAction SilentlyContinue
-
-bcdedit /enum {current} | findstr /i hypervisorlaunchtype
+Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model
 ```
 
-Gửi nguyên output 4 lệnh trên để xác định bước tiếp theo.
+Gửi output để xác định chính xác phím vào BIOS và vị trí tùy chọn Intel Virtualization Technology/VT-x cho đúng máy.
